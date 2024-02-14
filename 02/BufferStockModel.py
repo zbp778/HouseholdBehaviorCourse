@@ -97,6 +97,7 @@ class BufferStockModelClass(EconModelClass):
         sol = self.sol
         
         # b. solve last period
+        #Note: We consume everything in the last period.
         t = par.T-1
         sol.c[t,:] = par.m_grid
         sol.V[t,:] = self.util(sol.c[t,:])
@@ -136,7 +137,7 @@ class BufferStockModelClass(EconModelClass):
         
         # c. expected continuation value from savings
         V_next = sol.V[t+1]
-        assets = resources - cons
+        assets = resources - cons #assets in this period
         
         # loop over income shocks 
         EV_next = 0.0
@@ -145,12 +146,12 @@ class BufferStockModelClass(EconModelClass):
                 fac = par.G*par.psi_grid[i_psi] # normalization factor
 
                 # interpolate next period value function for this combination of transitory and permanent income shocks
-                m_next = (1.0+par.r)*assets/fac + par.xi_grid[i_xi]
+                m_next = (1.0+par.r)*assets/fac + par.xi_grid[i_xi] # resources in next period after shocks have been realized, we take 25 different combinations of shocks.
                 V_next_interp = interp_1d(par.m_grid,V_next,m_next)
                 V_next_interp = (fac**(1.0-par.rho)) * V_next_interp # normalization factor
 
                 # weight the interpolated value with the likelihood
-                EV_next += V_next_interp*par.xi_weight[i_xi]*par.psi_weight[i_psi]
+                EV_next += V_next_interp*par.xi_weight[i_xi]*par.psi_weight[i_psi] #Product due to independence
 
         # d. return value of choice
         return util + par.beta*EV_next
