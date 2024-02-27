@@ -43,8 +43,8 @@ class DynLaborModelClass(EconModelClass):
         par.a_min = -10.0 # minimum point in wealth grid
         par.Na = 70 # number of grid points in wealth grid 
         
-        par.k_max = 20.0 # maximum point in wealth grid
-        par.Nk = 30 # number of grid points in wealth grid    
+        par.k_max = 20.0 # maximum point in human capital grid
+        par.Nk = 30 # number of grid points in human capital grid    
 
         # simulation
         par.simT = par.T # number of periods
@@ -141,7 +141,7 @@ class DynLaborModelClass(EconModelClass):
 
                         bounds = ((lb_c,ub_c),(lb_h,ub_h))
             
-                        # call optimizer
+                        # call optimi zer
                         init = np.array([lb_c,1.0]) if (i_a==0 & i_k==0) else res.x  # initial guess on optimal consumption and hours
                         res = minimize(obj,init,bounds=bounds,method='L-BFGS-B',tol=1.0e-10) 
                     
@@ -169,7 +169,8 @@ class DynLaborModelClass(EconModelClass):
         par = self.par
         sol = self.sol
 
-        # b. penalty for violating bounds. 
+        # b. penalty for violating bounds.
+        # Can be useful even though it has explicitly been given bounds. 
         penalty = 0.0
         if cons < 0.0:
             penalty += cons*1_000.0
