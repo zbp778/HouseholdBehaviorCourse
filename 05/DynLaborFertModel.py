@@ -47,8 +47,8 @@ class DynLaborFertModelClass(EconModelClass):
         par.a_min = -10.0 # minimum point in wealth grid
         par.Na = 50 #70 # number of grid points in wealth grid 
         
-        par.k_max = 20.0 # maximum point in wealth grid
-        par.Nk = 20 #30 # number of grid points in wealth grid    
+        par.k_max = 20.0 # maximum point in human capital grid
+        par.Nk = 20 #30 # number of grid points in human capital grid    
 
         par.Nn = 2 # number of children
 
@@ -208,7 +208,7 @@ class DynLaborFertModelClass(EconModelClass):
         V_next_no_birth = interp_2d(par.a_grid,par.k_grid,V_next,a_next,k_next)
 
         # birth
-        if (kids>=(par.Nn-1)):
+        if (kids>=(par.Nn-1)): # if kids is at max already
             # cannot have more children
             V_next_birth = V_next_no_birth
 
