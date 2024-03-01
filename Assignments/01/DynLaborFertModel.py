@@ -27,7 +27,7 @@ class DynLaborFertModelClass(EconModelClass):
         par.rho = 0.98 # discount factor
 
         par.beta_0 = 0.1 # weight on labor dis-utility (constant)
-        par.beta_1 = 0.05 # additional weight on labor dis-utility (children)
+        par.beta_1 = 0.03 # additional weight on labor dis-utility (children)
         par.eta = -2.0 # CRRA coefficient
         par.gamma = 2.5 # curvature on labor hours 
 
@@ -56,6 +56,19 @@ class DynLaborFertModelClass(EconModelClass):
         par.simT = par.T # number of periods
         par.simN = 1_000 # number of individuals
 
+        # structural estimation
+        par.min_time = -8
+        par.max_time = 8
+
+        # income process
+        par.y_cons=0.1
+        par.y_growth=0.01
+
+        #childcare subsidy changes
+        par.theta=0.05
+
+        #par spouse
+        par.spouse=0.8
 
     def allocate(self):
         """ allocate model """
@@ -102,15 +115,36 @@ class DynLaborFertModelClass(EconModelClass):
         # h. vector of wages. Used for simulating elasticities
         par.w_vec = par.w * np.ones(par.T)
 
+        # i. structural estimation
+        par.birth = np.zeros(sim.n.shape,dtype=np.int_)
+        par.periods = np.tile([t for t in range(par.simT)],(par.simN,1))
+        par.event_grid = np.arange(par.min_time,par.max_time+1)
+        par.event_hours = np.nan + np.zeros(par.event_grid.size)
+
+        # j. parameters to be estimated
+        sim.beta_1N=8
+        sim.beta_1_min=0.000001
+        sim.beta_1_max=0.1
+        sim.distance_grid= np.nan + np.zeros(sim.beta_1N)
+        sim.beta_1_grid=np.linspace(sim.beta_1_min,sim.beta_1_max,sim.beta_1N)
+        sim.beta_1_grid=np.round(sim.beta_1_grid,2)
+        # k. income process
+        par.y_vec = par.y_cons * (1+par.y_growth)**np.arange(par.T)
+
+        #l. draws used to simulate spouse apperance
+        np.random.seed(9211)
+        sim.draws_uniform_spouse = np.random.uniform(size=shape)
 
     ############
     # Solution #
-    def solve(self):
+    def solve(self,beta_1=0.03):
 
         # a. unpack
         par = self.par
         sol = self.sol
         
+        # a2. update beta_1
+        par.beta_1 = beta_1
         # b. solve last period
         
         # c. loop backwards (over all periods)
@@ -127,7 +161,7 @@ class DynLaborFertModelClass(EconModelClass):
                         if t==par.T-1: # last period
                             obj = lambda x: self.obj_last(x[0],assets,capital,kids)
 
-                            constr = lambda x: self.cons_last(x[0],assets,capital)
+                            constr = lambda x: self.cons_last(x[0],assets,capital,kids)
                             nlc = NonlinearConstraint(constr, lb=0.0, ub=np.inf,keep_feasible=True)
 
                             # call optimizer
@@ -138,7 +172,7 @@ class DynLaborFertModelClass(EconModelClass):
                             res = minimize(obj,init_h,bounds=((0.0,np.inf),),constraints=nlc,method='trust-constr')
 
                             # store results
-                            sol.c[idx] = self.cons_last(res.x[0],assets,capital)
+                            sol.c[idx] = self.cons_last(res.x[0],assets,capital,kids)
                             sol.h[idx] = res.x[0]
                             sol.V[idx] = -res.fun
 
@@ -167,15 +201,15 @@ class DynLaborFertModelClass(EconModelClass):
                             sol.V[idx] = -res.fun
 
     # last period
-    def cons_last(self,hours,assets,capital):
+    def cons_last(self,hours,assets,capital,kids):
         par = self.par
-
-        income = self.wage_func(capital,par.T-1) * hours
+        #Note: edited to include partner's wage and childcare cost
+        income = self.wage_func(capital,par.T-1) * hours + par.y_vec[par.T-1] -par.theta*kids # Edited here
         cons = assets + income
         return cons
 
     def obj_last(self,hours,assets,capital,kids):
-        cons = self.cons_last(hours,assets,capital)
+        cons = self.cons_last(hours,assets,capital,kids)
         return - self.util(cons,hours,kids)    
 
     # earlier periods
@@ -198,7 +232,8 @@ class DynLaborFertModelClass(EconModelClass):
         util = self.util(cons,hours,kids)
         
         # d. *expected* continuation value from savings
-        income = self.wage_func(capital,t) * hours
+        #Note: edited to include partner's wage and childcare cost
+        income = self.wage_func(capital,t) * hours + par.y_vec[t] -par.theta*kids # Edited here
         a_next = (1.0+par.r)*(assets + income - cons)
         k_next = capital + hours
 
@@ -271,5 +306,71 @@ class DynLaborFertModelClass(EconModelClass):
                         birth = 1
                     sim.n[i,t+1] = sim.n[i,t] + birth
                     
+
+    ##############
+    # Evaluate Child Penalty#
+    def evaluate_diff_cp(self,beta_1):
+
+        """ Evaluate average drop in hours at t=0 relative to t=-1"""
+    
+        # a. unpack
+        par = self.par
+        sim = self.sim
+        sol = self.sol
+
+        # a2. update parameters
+        par.beta_1 = beta_1
+
+        # b. solve model using new parameters
+        self.solve(beta_1)
+
+        # b. simulate model using new parameters
+        self.simulate()
+
+        # c. define birth vector
+        par.birth[:,1:] = (sim.n[:,1:] - sim.n[:,:-1]) > 0
+    
+        #d. define time since birth
+        time_of_birth = np.max(par.periods * par.birth, axis=1)
+        I = time_of_birth>0
+        time_of_birth[~I] = -1000 # never has a child
+        time_of_birth = np.transpose(np.tile(time_of_birth , (par.simT,1)))
+        time_since_birth = par.periods - time_of_birth
+
+        #e. relative drop in hours after birth
+        for t,time in enumerate(par.event_grid):
+            #Average over the hours t years before birth by finding the persons'
+            #working hours who had given birth t years before.
+            par.event_hours[t] = np.mean(sim.h[time_since_birth==time])
+
+        # relative to period before birth
+        event_hours_rel = par.event_hours - par.event_hours[par.event_grid==-1]
+
+        return (-0.1-event_hours_rel[-par.min_time])**2
+    
+    ##############
+    #Structural Estimation#
+    def structural_estimation(self):
+
+        """" estimate parameters """
+        #a. par, sol
+        par = self.par
+        sol = self.sol
+        sim = self.sim
+
+        #b. callable objective function
+        obj = lambda x: self.evaluate_diff_cp(x)
+
+        #a. grid search
+        for ib,beta_1 in enumerate(sim.beta_1_grid):
+            #b. callable objective function
+            print(f"grid_count={ib}")
+            sim.distance_grid[ib] = obj(beta_1)
+
+        min_distance_index=np.argmin(sim.distance_grid)
+        min_distance_value=np.sqrt(sim.distance_grid[min_distance_index])
+        beta_1_struc=sim.beta_1_grid[min_distance_index]
+
+        return (min_distance_index,min_distance_value, beta_1_struc)
 
 
